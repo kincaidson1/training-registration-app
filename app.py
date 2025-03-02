@@ -1,15 +1,23 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import os
+import csv
+from io import StringIO
+from functools import wraps
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key')  # Change this in production
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///events.db')
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
 
 db = SQLAlchemy(app)
+
+# Admin credentials (in production, use environment variables)
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', generate_password_hash('admin123'))
 
 class Registration(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -18,9 +26,28 @@ class Registration(db.Model):
     phone = db.Column(db.String(20), nullable=False)
     event_date = db.Column(db.DateTime, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), default='pending')  # pending, confirmed, cancelled
+    notes = db.Column(db.Text, nullable=True)
 
 with app.app_context():
     db.create_all()
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated_function
+
+def check_auth(username, password):
+    return username == ADMIN_USERNAME and check_password_hash(ADMIN_PASSWORD, password)
+
+def authenticate():
+    return ('Could not verify your access level for that URL.\n'
+            'You have to login with proper credentials', 401,
+            {'WWW-Authenticate': 'Basic realm="Login Required"'})
 
 @app.route('/')
 def index():
@@ -50,30 +77,112 @@ def register():
         
     return redirect(url_for('index'))
 
-# Admin routes
 @app.route('/admin')
+@admin_required
 def admin():
     registrations = Registration.query.order_by(Registration.created_at.desc()).all()
     return render_template('admin.html', registrations=registrations)
 
 @app.route('/api/registrations')
+@admin_required
 def get_registrations():
-    registrations = Registration.query.order_by(Registration.created_at.desc()).all()
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    status = request.args.get('status')
+    
+    query = Registration.query
+    
+    if start_date:
+        query = query.filter(Registration.event_date >= datetime.strptime(start_date, '%Y-%m-%d'))
+    if end_date:
+        query = query.filter(Registration.event_date <= datetime.strptime(end_date, '%Y-%m-%d'))
+    if status:
+        query = query.filter(Registration.status == status)
+        
+    registrations = query.order_by(Registration.created_at.desc()).all()
+    
     return jsonify([{
         'id': r.id,
         'name': r.name,
         'email': r.email,
         'phone': r.phone,
         'event_date': r.event_date.strftime('%Y-%m-%d'),
-        'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'status': r.status,
+        'notes': r.notes
     } for r in registrations])
 
 @app.route('/api/registration/<int:id>', methods=['DELETE'])
+@admin_required
 def delete_registration(id):
     registration = Registration.query.get_or_404(id)
     db.session.delete(registration)
     db.session.commit()
     return jsonify({'message': 'Registration deleted successfully'})
+
+@app.route('/api/registration/<int:id>', methods=['PUT'])
+@admin_required
+def update_registration(id):
+    registration = Registration.query.get_or_404(id)
+    data = request.get_json()
+    
+    if 'name' in data:
+        registration.name = data['name']
+    if 'email' in data:
+        registration.email = data['email']
+    if 'phone' in data:
+        registration.phone = data['phone']
+    if 'event_date' in data:
+        registration.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d')
+    if 'status' in data:
+        registration.status = data['status']
+    if 'notes' in data:
+        registration.notes = data['notes']
+    
+    db.session.commit()
+    return jsonify({'message': 'Registration updated successfully'})
+
+@app.route('/api/registrations/bulk-delete', methods=['POST'])
+@admin_required
+def bulk_delete():
+    ids = request.get_json().get('ids', [])
+    Registration.query.filter(Registration.id.in_(ids)).delete()
+    db.session.commit()
+    return jsonify({'message': f'{len(ids)} registrations deleted successfully'})
+
+@app.route('/api/export-csv')
+@admin_required
+def export_csv():
+    registrations = Registration.query.order_by(Registration.created_at.desc()).all()
+    
+    si = StringIO()
+    cw = csv.writer(si)
+    
+    # Write headers
+    cw.writerow(['ID', 'Name', 'Email', 'Phone', 'Event Date', 'Registration Date', 'Status', 'Notes'])
+    
+    # Write data
+    for r in registrations:
+        cw.writerow([
+            r.id,
+            r.name,
+            r.email,
+            r.phone,
+            r.event_date.strftime('%Y-%m-%d'),
+            r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            r.status,
+            r.notes
+        ])
+    
+    output = si.getvalue()
+    si.close()
+    
+    return send_file(
+        StringIO(output),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name='registrations.csv'
+    )
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
