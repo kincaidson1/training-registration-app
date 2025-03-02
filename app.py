@@ -79,7 +79,6 @@ class Registration(db.Model):
     organization = db.Column(db.String(200))
     designation = db.Column(db.String(100))
     expectations = db.Column(db.Text)
-    event_date = db.Column(db.DateTime, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(20), default='pending')
     payment_reference = db.Column(db.String(100))
@@ -187,7 +186,6 @@ def program_registration(program_id):
                 organization=request.form['organization'],
                 designation=request.form['designation'],
                 expectations=request.form['expectations'],
-                event_date=datetime.strptime(request.form['event_date'], '%Y-%m-%d'),
                 payment_reference=request.form['payment_reference'],
                 payment_receipt=filename
             )
@@ -228,7 +226,6 @@ def submit_registration():
         organization = request.form.get('organization')
         designation = request.form.get('designation')
         expectations = request.form.get('expectations')
-        event_date = datetime.strptime(request.form.get('event_date'), '%Y-%m-%d')
         payment_reference = request.form.get('payment_reference')
         
         # Handle file upload
@@ -248,7 +245,6 @@ def submit_registration():
             organization=organization,
             designation=designation,
             expectations=expectations,
-            event_date=event_date,
             payment_reference=payment_reference,
             payment_receipt=payment_receipt
         )
@@ -275,8 +271,7 @@ def submit_registration():
         msg.html = render_template(
             'ticket_email.html',
             name=name,
-            registration_id=registration.id,
-            event_date=event_date
+            registration_id=registration.id
         )
         msg.attach(
             'registration_qr.png',
@@ -346,7 +341,6 @@ def get_registration(id):
             'organization': registration.organization,
             'designation': registration.designation,
             'expectations': registration.expectations,
-            'event_date': registration.event_date.strftime('%Y-%m-%d'),
             'created_at': registration.created_at.strftime('%Y-%m-%d %H:%M:%S'),
             'status': registration.status,
             'payment_reference': registration.payment_reference,
@@ -375,8 +369,6 @@ def update_registration(id):
             registration.designation = data['designation']
         if 'expectations' in data:
             registration.expectations = data['expectations']
-        if 'event_date' in data:
-            registration.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d')
         if 'status' in data:
             registration.status = data['status']
         if 'payment_reference' in data:
@@ -411,7 +403,7 @@ def export_csv():
         
         # Write headers
         cw.writerow(['ID', 'Program', 'Name', 'Email', 'Phone', 'Organization', 'Designation', 
-                    'Expectations', 'Event Date', 'Registration Date', 'Status', 
+                    'Expectations', 'Registration Date', 'Status', 
                     'Payment Reference', 'Payment Receipt', 'Notes'])
         
         # Write data
@@ -425,7 +417,6 @@ def export_csv():
                 r.organization,
                 r.designation,
                 r.expectations,
-                r.event_date.strftime('%Y-%m-%d'),
                 r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
                 r.status,
                 r.payment_reference,
