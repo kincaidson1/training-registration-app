@@ -134,9 +134,40 @@ def welcome():
     return render_template('welcome.html')
 
 @app.route('/register')
-def register_page():
-    programs = Program.query.all()
-    return render_template('index.html', programs=programs)
+def register():
+    try:
+        programs = Program.query.all()
+        return render_template('index.html', programs=programs)
+    except Exception as e:
+        print(f"Error in register route: {str(e)}")
+        flash('Error loading programs. Please try again later.', 'error')
+        return redirect(url_for('welcome'))
+
+@app.route('/register/<int:program_id>', methods=['GET', 'POST'])
+def program_registration(program_id):
+    try:
+        program = Program.query.get_or_404(program_id)
+        if request.method == 'POST':
+            # Handle form submission
+            registration = Registration(
+                program_id=program_id,
+                name=request.form['name'],
+                email=request.form['email'],
+                phone=request.form['phone'],
+                organization=request.form['organization'],
+                designation=request.form['designation'],
+                expectations=request.form['expectations'],
+                event_date=datetime.strptime(request.form['event_date'], '%Y-%m-%d')
+            )
+            db.session.add(registration)
+            db.session.commit()
+            flash('Registration successful!', 'success')
+            return redirect(url_for('welcome'))
+        return render_template('registration_form.html', program=program)
+    except Exception as e:
+        print(f"Error in program_registration route: {str(e)}")
+        flash('An error occurred. Please try again.', 'error')
+        return redirect(url_for('register'))
 
 @app.route('/submit_registration', methods=['POST'])
 def submit_registration():
