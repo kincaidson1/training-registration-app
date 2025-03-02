@@ -21,14 +21,26 @@ from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import secrets
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 
 # Configure app with environment variables or defaults
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(16))
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///registrations.db')
-if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
-    app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
+
+# Database configuration
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    # Handle Heroku/Render PostgreSQL URL
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///registrations.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # File upload configuration
@@ -46,6 +58,7 @@ app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER')
 
+# Initialize extensions
 db = SQLAlchemy(app)
 mail = Mail(app)
 
@@ -85,40 +98,50 @@ class Admin(db.Model):
         return check_password_hash(self.password_hash, password)
 
 def init_db():
-    with app.app_context():
-        db.create_all()
-        
-        # Create default programs if they don't exist
-        if not Program.query.first():
-            london_program = Program(
-                name='London Masterclass',
-                description='Advanced training program in London',
-                location='London',
-                fee=1500.00
-            )
-            lagos_program = Program(
-                name='Lagos Masterclass',
-                description='Advanced training program in Lagos',
-                location='Lagos',
-                fee=1000.00
-            )
-            db.session.add(london_program)
-            db.session.add(lagos_program)
+    """Initialize the database and create default data."""
+    try:
+        with app.app_context():
+            # Create all tables
+            db.create_all()
+            
+            # Create default programs if they don't exist
+            if not Program.query.first():
+                programs = [
+                    Program(
+                        name='London Masterclass',
+                        description='Advanced training program in London',
+                        location='London',
+                        fee=1500.00
+                    ),
+                    Program(
+                        name='Lagos Masterclass',
+                        description='Advanced training program in Lagos',
+                        location='Lagos',
+                        fee=1000.00
+                    )
+                ]
+                db.session.add_all(programs)
             
             # Create default admin if it doesn't exist
-            if not Admin.query.filter_by(username='admin').first():
+            admin = Admin.query.filter_by(username='admin').first()
+            if not admin:
                 admin = Admin(username='admin')
-                admin.set_password('admin123')  # Change this in production
+                admin.set_password('admin123')
                 db.session.add(admin)
+            else:
+                # Update existing admin password
+                admin.set_password('admin123')
             
             try:
                 db.session.commit()
+                print("Database initialized successfully!")
             except Exception as e:
+                print(f"Error during database commit: {str(e)}")
                 db.session.rollback()
-                print(f"Error during database initialization: {str(e)}")
-
-# Initialize the database
-init_db()
+                
+    except Exception as e:
+        print(f"Error initializing database: {str(e)}")
+        db.session.rollback()
 
 def admin_required(f):
     @wraps(f)
@@ -131,7 +154,11 @@ def admin_required(f):
 
 @app.route('/')
 def welcome():
-    return render_template('welcome.html')
+    try:
+        return render_template('welcome.html')
+    except Exception as e:
+        print(f"Error in welcome route: {str(e)}")
+        return "An error occurred", 500
 
 @app.route('/register')
 def register():
@@ -245,19 +272,26 @@ def submit_registration():
 
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+    try:
+        if request.method == 'POST':
+            username = request.form.get('username')
+            password = request.form.get('password')
+            
+            admin = Admin.query.filter_by(username=username).first()
+            
+            if admin and admin.check_password(password):
+                session['admin_logged_in'] = True
+                flash('Successfully logged in!', 'success')
+                return redirect(url_for('admin'))
+            else:
+                print(f"Login failed - Username: {username}, Admin exists: {admin is not None}")
+                flash('Invalid username or password', 'error')
         
-        admin = Admin.query.filter_by(username=username).first()
-        if admin and admin.check_password(password):
-            session['admin_logged_in'] = True
-            flash('Successfully logged in!', 'success')
-            return redirect(url_for('admin'))
-        
-        flash('Invalid username or password', 'error')
-    
-    return render_template('admin_login.html')
+        return render_template('admin_login.html')
+    except Exception as e:
+        print(f"Error in admin_login route: {str(e)}")
+        flash('An error occurred during login. Please try again.', 'error')
+        return render_template('admin_login.html')
 
 @app.route('/admin/logout')
 def admin_logout():
@@ -272,7 +306,8 @@ def admin():
         registrations = Registration.query.order_by(Registration.created_at.desc()).all()
         return render_template('admin.html', registrations=registrations)
     except Exception as e:
-        flash(f'Error loading registrations: {str(e)}', 'error')
+        print(f"Error in admin route: {str(e)}")
+        flash('Error loading registrations. Please try again.', 'error')
         return redirect(url_for('admin_login'))
 
 @app.route('/api/registrations/<int:id>', methods=['GET'])
@@ -384,6 +419,10 @@ def export_csv():
         flash('Error exporting data', 'error')
         return redirect(url_for('admin'))
 
+# Initialize the database when the app starts
+with app.app_context():
+    init_db()
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port)
