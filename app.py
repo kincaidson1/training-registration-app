@@ -9,21 +9,25 @@ import base64
 from io import StringIO, BytesIO
 from functools import wraps
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
 # Configure Flask app
-app.config['SECRET_KEY'] = 'dev-secret-key-123'  # Temporary hard-coded secret key
+app.config['SECRET_KEY'] = 'dev-secret-key-123'
+app.config['UPLOAD_FOLDER'] = 'uploads'
+
+# Ensure upload directory exists
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
 
 # Configure Database
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
-    # Handle Heroku/Render style database URLs
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 else:
-    # Fallback to SQLite for local development
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///events.db'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -39,27 +43,64 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER')
 db = SQLAlchemy(app)
 mail = Mail(app)
 
-# Hardcoded admin credentials for testing
-ADMIN_USERNAME = 'admin'
-ADMIN_PASSWORD = 'admin123'
+class Program(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    location = db.Column(db.String(100), nullable=False)
+    fee = db.Column(db.Float, nullable=False)
+    description = db.Column(db.Text)
+    registrations = db.relationship('Registration', backref='program', lazy=True)
 
 class Registration(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    program_id = db.Column(db.Integer, db.ForeignKey('program.id'), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(120), nullable=False)
     phone = db.Column(db.String(20), nullable=False)
+    organization = db.Column(db.String(200), nullable=False)
+    designation = db.Column(db.String(100), nullable=False)
+    expectations = db.Column(db.Text)
     event_date = db.Column(db.DateTime, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(20), default='pending')
-    notes = db.Column(db.Text, nullable=True)
+    payment_reference = db.Column(db.String(100))
+    payment_receipt = db.Column(db.String(200))
+    notes = db.Column(db.Text)
     ticket_sent = db.Column(db.Boolean, default=False)
 
-def create_tables():
+def init_db():
     with app.app_context():
         db.create_all()
+        
+        # Add programs if they don't exist
+        if not Program.query.first():
+            programs = [
+                Program(
+                    name='LSE Masterclass',
+                    location='London',
+                    fee=3550000,
+                    description='LONDON LSE MASTERCLASS - 3-day intensive program'
+                ),
+                Program(
+                    name='Lagos Masterclass',
+                    location='Lagos',
+                    fee=1250000,
+                    description='LAGOS MASTERCLASS - 3-day intensive program'
+                )
+            ]
+            for program in programs:
+                db.session.add(program)
+            db.session.commit()
 
-# Create tables
-create_tables()
+init_db()
+
+def allowed_file(filename):
+    ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# Hardcoded admin credentials for testing
+ADMIN_USERNAME = 'admin'
+ADMIN_PASSWORD = 'admin123'
 
 def admin_required(f):
     @wraps(f)
@@ -131,22 +172,48 @@ def send_ticket_email(registration):
 
 @app.route('/')
 def index():
-    registrations = Registration.query.all()
-    return render_template('index.html', registrations=registrations)
+    programs = Program.query.all()
+    return render_template('index.html', programs=programs)
+
+@app.route('/program/<int:program_id>')
+def program_registration(program_id):
+    program = Program.query.get_or_404(program_id)
+    return render_template('registration_form.html', program=program)
 
 @app.route('/register', methods=['POST'])
 def register():
     try:
+        # Get form data
+        program_id = request.form['program_id']
         name = request.form['name']
         email = request.form['email']
         phone = request.form['phone']
+        organization = request.form['organization']
+        designation = request.form['designation']
+        expectations = request.form['expectations']
         event_date = datetime.strptime(request.form['event_date'], '%Y-%m-%d')
+        payment_reference = request.form['payment_reference']
+        
+        # Handle file upload
+        payment_receipt = None
+        if 'payment_receipt' in request.files:
+            file = request.files['payment_receipt']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(f"{payment_reference}_{file.filename}")
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                payment_receipt = filename
         
         registration = Registration(
+            program_id=program_id,
             name=name,
             email=email,
             phone=phone,
-            event_date=event_date
+            organization=organization,
+            designation=designation,
+            expectations=expectations,
+            event_date=event_date,
+            payment_reference=payment_reference,
+            payment_receipt=payment_receipt
         )
         
         db.session.add(registration)
@@ -195,12 +262,18 @@ def get_registrations():
         
         return jsonify([{
             'id': r.id,
+            'program': r.program.name,
             'name': r.name,
             'email': r.email,
             'phone': r.phone,
+            'organization': r.organization,
+            'designation': r.designation,
+            'expectations': r.expectations,
             'event_date': r.event_date.strftime('%Y-%m-%d'),
             'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
             'status': r.status,
+            'payment_reference': r.payment_reference,
+            'payment_receipt': r.payment_receipt,
             'notes': r.notes
         } for r in registrations])
     except Exception as e:
@@ -232,10 +305,20 @@ def update_registration(id):
             registration.email = data['email']
         if 'phone' in data:
             registration.phone = data['phone']
+        if 'organization' in data:
+            registration.organization = data['organization']
+        if 'designation' in data:
+            registration.designation = data['designation']
+        if 'expectations' in data:
+            registration.expectations = data['expectations']
         if 'event_date' in data:
             registration.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d')
         if 'status' in data:
             registration.status = data['status']
+        if 'payment_reference' in data:
+            registration.payment_reference = data['payment_reference']
+        if 'payment_receipt' in data:
+            registration.payment_receipt = data['payment_receipt']
         if 'notes' in data:
             registration.notes = data['notes']
         
@@ -267,18 +350,24 @@ def export_csv():
         cw = csv.writer(si)
         
         # Write headers
-        cw.writerow(['ID', 'Name', 'Email', 'Phone', 'Event Date', 'Registration Date', 'Status', 'Notes'])
+        cw.writerow(['ID', 'Program', 'Name', 'Email', 'Phone', 'Organization', 'Designation', 'Expectations', 'Event Date', 'Registration Date', 'Status', 'Payment Reference', 'Payment Receipt', 'Notes'])
         
         # Write data
         for r in registrations:
             cw.writerow([
                 r.id,
+                r.program.name,
                 r.name,
                 r.email,
                 r.phone,
+                r.organization,
+                r.designation,
+                r.expectations,
                 r.event_date.strftime('%Y-%m-%d'),
                 r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
                 r.status,
+                r.payment_reference,
+                r.payment_receipt,
                 r.notes
             ])
         
