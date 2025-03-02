@@ -10,7 +10,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 app = Flask(__name__)
 
 # Configure Flask app
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key')
+app.config['SECRET_KEY'] = 'dev-secret-key-123'  # Temporary hard-coded secret key
 
 # Configure Database
 database_url = os.environ.get('DATABASE_URL')
@@ -27,9 +27,9 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# Admin credentials
-ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
-ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', generate_password_hash('admin123'))
+# Hardcoded admin credentials for testing
+ADMIN_USERNAME = 'admin'
+ADMIN_PASSWORD = 'admin123'
 
 class Registration(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -58,9 +58,14 @@ def admin_required(f):
     return decorated_function
 
 def check_auth(username, password):
-    return username == ADMIN_USERNAME and check_password_hash(ADMIN_PASSWORD, password)
+    """Check if username and password are valid."""
+    print(f"Login attempt - Username: {username}, Password: {password}")  # Debug log
+    is_valid = username == ADMIN_USERNAME and password == ADMIN_PASSWORD
+    print(f"Login valid: {is_valid}")  # Debug log
+    return is_valid
 
 def authenticate():
+    """Sends a 401 response that enables basic auth."""
     return ('Could not verify your access level for that URL.\n'
             'You have to login with proper credentials', 401,
             {'WWW-Authenticate': 'Basic realm="Login Required"'})
