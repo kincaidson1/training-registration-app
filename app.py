@@ -1,40 +1,46 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, make_response
+from flask import (
+    Flask, 
+    render_template, 
+    request, 
+    redirect, 
+    url_for, 
+    flash, 
+    jsonify, 
+    send_file, 
+    make_response, 
+    session
+)
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
 from datetime import datetime
 import os
-import csv
 import qrcode
-import base64
-from io import StringIO, BytesIO
+from io import BytesIO, StringIO
+import csv
 from functools import wraps
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+import secrets
 
 app = Flask(__name__)
 
-# Configure Flask app
-app.config['SECRET_KEY'] = 'dev-secret-key-123'
-app.config['UPLOAD_FOLDER'] = 'uploads'
-
-# Ensure upload directory exists
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
-
-# Configure Database
-database_url = os.environ.get('DATABASE_URL')
-if database_url:
-    if database_url.startswith('postgres://'):
-        database_url = database_url.replace('postgres://', 'postgresql://', 1)
-    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///events.db'
-
+# Configure app with environment variables or defaults
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(16))
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///registrations.db')
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
+    app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Configure Mail
+# File upload configuration
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+# Ensure upload directory exists
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Email configuration
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', '587'))
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
@@ -46,9 +52,9 @@ mail = Mail(app)
 class Program(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    location = db.Column(db.String(100), nullable=False)
-    fee = db.Column(db.Float, nullable=False)
     description = db.Column(db.Text)
+    location = db.Column(db.String(100))
+    fee = db.Column(db.Float)
     registrations = db.relationship('Registration', backref='program', lazy=True)
 
 class Registration(db.Model):
@@ -56,9 +62,9 @@ class Registration(db.Model):
     program_id = db.Column(db.Integer, db.ForeignKey('program.id'), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(120), nullable=False)
-    phone = db.Column(db.String(20), nullable=False)
-    organization = db.Column(db.String(200), nullable=False)
-    designation = db.Column(db.String(100), nullable=False)
+    phone = db.Column(db.String(20))
+    organization = db.Column(db.String(200))
+    designation = db.Column(db.String(100))
     expectations = db.Column(db.Text)
     event_date = db.Column(db.DateTime, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -66,109 +72,62 @@ class Registration(db.Model):
     payment_reference = db.Column(db.String(100))
     payment_receipt = db.Column(db.String(200))
     notes = db.Column(db.Text)
-    ticket_sent = db.Column(db.Boolean, default=False)
+
+class Admin(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(120), nullable=False)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 def init_db():
     with app.app_context():
         db.create_all()
         
-        # Add programs if they don't exist
+        # Create default programs if they don't exist
         if not Program.query.first():
-            programs = [
-                Program(
-                    name='LSE Masterclass',
-                    location='London',
-                    fee=3550000,
-                    description='LONDON LSE MASTERCLASS - 3-day intensive program'
-                ),
-                Program(
-                    name='Lagos Masterclass',
-                    location='Lagos',
-                    fee=1250000,
-                    description='LAGOS MASTERCLASS - 3-day intensive program'
-                )
-            ]
-            for program in programs:
-                db.session.add(program)
-            db.session.commit()
+            london_program = Program(
+                name='London Masterclass',
+                description='Advanced training program in London',
+                location='London',
+                fee=1500.00
+            )
+            lagos_program = Program(
+                name='Lagos Masterclass',
+                description='Advanced training program in Lagos',
+                location='Lagos',
+                fee=1000.00
+            )
+            db.session.add(london_program)
+            db.session.add(lagos_program)
+            
+            # Create default admin if it doesn't exist
+            if not Admin.query.filter_by(username='admin').first():
+                admin = Admin(username='admin')
+                admin.set_password('admin123')  # Change this in production
+                db.session.add(admin)
+            
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"Error during database initialization: {str(e)}")
 
+# Initialize the database
 init_db()
-
-def allowed_file(filename):
-    ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# Hardcoded admin credentials for testing
-ADMIN_USERNAME = 'admin'
-ADMIN_PASSWORD = 'admin123'
 
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password):
-            return authenticate()
+        if not session.get('admin_logged_in'):
+            flash('Please log in first.', 'error')
+            return redirect(url_for('admin_login'))
         return f(*args, **kwargs)
     return decorated_function
-
-def check_auth(username, password):
-    """Check if username and password are valid."""
-    print(f"Login attempt - Username: {username}, Password: {password}")  # Debug log
-    is_valid = username == ADMIN_USERNAME and password == ADMIN_PASSWORD
-    print(f"Login valid: {is_valid}")  # Debug log
-    return is_valid
-
-def authenticate():
-    """Sends a 401 response that enables basic auth."""
-    return ('Could not verify your access level for that URL.\n'
-            'You have to login with proper credentials', 401,
-            {'WWW-Authenticate': 'Basic realm="Login Required"'})
-
-def generate_qr_code(registration_id):
-    """Generate QR code for a registration."""
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(f"Registration ID: {registration_id}")
-    qr.make(fit=True)
-
-    img = qr.make_image(fill_color="black", back_color="white")
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode()
-
-def send_ticket_email(registration):
-    """Send ticket email to participant."""
-    try:
-        # Generate QR code
-        qr_code_data = generate_qr_code(registration.id)
-        
-        # Render email template
-        html = render_template('ticket_email.html',
-                             registration=registration,
-                             qr_code=f"data:image/png;base64,{qr_code_data}")
-        
-        # Create email message
-        msg = Message(
-            'Your Training Event Ticket',
-            recipients=[registration.email]
-        )
-        msg.html = html
-        
-        # Send email
-        mail.send(msg)
-        
-        # Update ticket sent status
-        registration.ticket_sent = True
-        db.session.commit()
-        
-        return True
-    except Exception as e:
-        print(f"Error sending ticket email: {str(e)}")
-        return False
 
 @app.route('/')
 def welcome():
@@ -179,34 +138,28 @@ def register_page():
     programs = Program.query.all()
     return render_template('index.html', programs=programs)
 
-@app.route('/program/<int:program_id>')
-def program_registration(program_id):
-    program = Program.query.get_or_404(program_id)
-    return render_template('registration_form.html', program=program)
-
-@app.route('/register', methods=['POST'])
-def register():
+@app.route('/submit_registration', methods=['POST'])
+def submit_registration():
     try:
-        # Get form data
-        program_id = request.form['program_id']
-        name = request.form['name']
-        email = request.form['email']
-        phone = request.form['phone']
-        organization = request.form['organization']
-        designation = request.form['designation']
-        expectations = request.form['expectations']
-        event_date = datetime.strptime(request.form['event_date'], '%Y-%m-%d')
-        payment_reference = request.form['payment_reference']
+        program_id = request.form.get('program_id')
+        name = request.form.get('name')
+        email = request.form.get('email')
+        phone = request.form.get('phone')
+        organization = request.form.get('organization')
+        designation = request.form.get('designation')
+        expectations = request.form.get('expectations')
+        event_date = datetime.strptime(request.form.get('event_date'), '%Y-%m-%d')
+        payment_reference = request.form.get('payment_reference')
         
         # Handle file upload
         payment_receipt = None
         if 'payment_receipt' in request.files:
             file = request.files['payment_receipt']
-            if file and allowed_file(file.filename):
-                filename = secure_filename(f"{payment_reference}_{file.filename}")
+            if file and file.filename:
+                filename = secure_filename(file.filename)
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 payment_receipt = filename
-        
+
         registration = Registration(
             program_id=program_id,
             name=name,
@@ -222,24 +175,74 @@ def register():
         
         db.session.add(registration)
         db.session.commit()
+
+        # Generate QR code
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(f"Registration ID: {registration.id}\nName: {name}\nEmail: {email}")
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
         
-        # Send ticket email
-        if send_ticket_email(registration):
-            flash('Registration successful! Check your email for your ticket.', 'success')
-        else:
-            flash('Registration successful, but there was an error sending the ticket email. Please contact support.', 'warning')
-            
+        # Save QR code
+        qr_buffer = BytesIO()
+        qr_img.save(qr_buffer, format='PNG')
+        qr_buffer.seek(0)
+        
+        # Send confirmation email with QR code
+        msg = Message(
+            'Registration Confirmation',
+            recipients=[email]
+        )
+        msg.html = render_template(
+            'ticket_email.html',
+            name=name,
+            registration_id=registration.id,
+            event_date=event_date
+        )
+        msg.attach(
+            'registration_qr.png',
+            'image/png',
+            qr_buffer.getvalue()
+        )
+        mail.send(msg)
+
+        flash('Registration successful! Check your email for the confirmation.', 'success')
     except Exception as e:
         flash('Registration failed. Please try again.', 'error')
         print(f"Error during registration: {str(e)}")
         
     return redirect(url_for('welcome'))
 
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        admin = Admin.query.filter_by(username=username).first()
+        if admin and admin.check_password(password):
+            session['admin_logged_in'] = True
+            flash('Successfully logged in!', 'success')
+            return redirect(url_for('admin'))
+        
+        flash('Invalid username or password', 'error')
+    
+    return render_template('admin_login.html')
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin_logged_in', None)
+    flash('Successfully logged out!', 'success')
+    return redirect(url_for('admin_login'))
+
 @app.route('/admin')
 @admin_required
 def admin():
-    registrations = Registration.query.order_by(Registration.created_at.desc()).all()
-    return render_template('admin.html', registrations=registrations)
+    try:
+        registrations = Registration.query.order_by(Registration.created_at.desc()).all()
+        return render_template('admin.html', registrations=registrations)
+    except Exception as e:
+        flash(f'Error loading registrations: {str(e)}', 'error')
+        return redirect(url_for('admin_login'))
 
 @app.route('/api/registrations/<int:id>', methods=['GET'])
 @admin_required
@@ -248,7 +251,7 @@ def get_registration(id):
         registration = Registration.query.get_or_404(id)
         return jsonify({
             'id': registration.id,
-            'program': registration.program.name,
+            'program_id': registration.program_id,
             'name': registration.name,
             'email': registration.email,
             'phone': registration.phone,
@@ -290,8 +293,6 @@ def update_registration(id):
             registration.status = data['status']
         if 'payment_reference' in data:
             registration.payment_reference = data['payment_reference']
-        if 'payment_receipt' in data:
-            registration.payment_receipt = data['payment_receipt']
         if 'notes' in data:
             registration.notes = data['notes']
         
@@ -352,57 +353,6 @@ def export_csv():
         flash('Error exporting data', 'error')
         return redirect(url_for('admin'))
 
-@app.route('/api/registrations')
-@admin_required
-def get_registrations():
-    try:
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        status = request.args.get('status')
-        
-        query = Registration.query
-        
-        if start_date:
-            query = query.filter(Registration.event_date >= datetime.strptime(start_date, '%Y-%m-%d'))
-        if end_date:
-            query = query.filter(Registration.event_date <= datetime.strptime(end_date, '%Y-%m-%d'))
-        if status:
-            query = query.filter(Registration.status == status)
-            
-        registrations = query.order_by(Registration.created_at.desc()).all()
-        
-        return jsonify([{
-            'id': r.id,
-            'program': r.program.name,
-            'name': r.name,
-            'email': r.email,
-            'phone': r.phone,
-            'organization': r.organization,
-            'designation': r.designation,
-            'expectations': r.expectations,
-            'event_date': r.event_date.strftime('%Y-%m-%d'),
-            'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-            'status': r.status,
-            'payment_reference': r.payment_reference,
-            'payment_receipt': r.payment_receipt,
-            'notes': r.notes
-        } for r in registrations])
-    except Exception as e:
-        print(f"Error in get_registrations: {str(e)}")  # Add logging
-        return jsonify({'error': 'An error occurred'}), 500
-
-@app.route('/api/registrations/bulk-delete', methods=['POST'])
-@admin_required
-def bulk_delete():
-    try:
-        ids = request.get_json().get('ids', [])
-        Registration.query.filter(Registration.id.in_(ids)).delete()
-        db.session.commit()
-        return jsonify({'message': f'{len(ids)} registrations deleted successfully'})
-    except Exception as e:
-        print(f"Error in bulk_delete: {str(e)}")  # Add logging
-        return jsonify({'error': 'An error occurred'}), 500
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)
