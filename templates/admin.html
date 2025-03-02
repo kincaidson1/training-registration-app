@@ -5,41 +5,63 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
     <style>
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 2rem 0;
+            background: #f8f9fa;
+            padding: 20px;
         }
         .container {
-            background: rgba(255, 255, 255, 0.95);
+            max-width: 1400px;
+            background: white;
             padding: 2rem;
             border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
         }
-        .btn-action {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.875rem;
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
         }
-        .modal-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .btn-logout {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            text-decoration: none;
+        }
+        .btn-logout:hover {
+            background: #c82333;
             color: white;
         }
-        .btn-close {
-            filter: brightness(0) invert(1);
+        .table th {
+            background: #f8f9fa;
+            white-space: nowrap;
+        }
+        .badge {
+            padding: 0.5em 1em;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="header">
             <h1>Admin Dashboard</h1>
             <div>
-                <button class="btn btn-success me-2" onclick="exportCSV()">Export CSV</button>
-                <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Home</a>
+                <a href="{{ url_for('export_registrations') }}" class="btn btn-success me-2">Export CSV</a>
+                <a href="{{ url_for('admin_logout') }}" class="btn-logout">Logout</a>
             </div>
         </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} mb-4">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
 
         <div class="table-responsive">
             <table id="registrationsTable" class="table table-striped">
@@ -51,29 +73,44 @@
                         <th>Email</th>
                         <th>Phone</th>
                         <th>Organization</th>
-                        <th>Event Date</th>
+                        <th>Designation</th>
                         <th>Status</th>
+                        <th>Registration Date</th>
+                        <th>Payment Ref</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for registration in registrations %}
+                    {% for reg in registrations %}
                     <tr>
-                        <td>{{ registration.id }}</td>
-                        <td>{{ registration.program.name }}</td>
-                        <td>{{ registration.name }}</td>
-                        <td>{{ registration.email }}</td>
-                        <td>{{ registration.phone }}</td>
-                        <td>{{ registration.organization }}</td>
-                        <td>{{ registration.event_date.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ reg.id }}</td>
+                        <td>{{ reg.program_name }}</td>
+                        <td>{{ reg.name }}</td>
+                        <td>{{ reg.email }}</td>
+                        <td>{{ reg.phone }}</td>
+                        <td>{{ reg.organization }}</td>
+                        <td>{{ reg.designation }}</td>
                         <td>
-                            <span class="badge {% if registration.status == 'confirmed' %}bg-success{% elif registration.status == 'pending' %}bg-warning{% else %}bg-danger{% endif %}">
-                                {{ registration.status }}
+                            <span class="badge {% if reg.status == 'pending' %}bg-warning{% elif reg.status == 'approved' %}bg-success{% else %}bg-danger{% endif %}">
+                                {{ reg.status }}
                             </span>
                         </td>
+                        <td>{{ reg.created_at }}</td>
+                        <td>{{ reg.payment_reference }}</td>
                         <td>
-                            <button class="btn btn-primary btn-action" onclick="editRegistration({{ registration.id }})">Edit</button>
-                            <button class="btn btn-danger btn-action" onclick="deleteRegistration({{ registration.id }})">Delete</button>
+                            <div class="btn-group">
+                                {% if reg.payment_receipt %}
+                                <a href="{{ url_for('download_receipt', registration_id=reg.id) }}" class="btn btn-sm btn-info" title="Download Receipt">
+                                    📄
+                                </a>
+                                {% endif %}
+                                <button class="btn btn-sm btn-primary" onclick="viewRegistration({{ reg.id }})" title="View Details">
+                                    👁️
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteRegistration({{ reg.id }})" title="Delete">
+                                    🗑️
+                                </button>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -82,151 +119,36 @@
         </div>
     </div>
 
-    <!-- Edit Modal -->
-    <div class="modal fade" id="editModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Edit Registration</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="editForm">
-                        <input type="hidden" id="editId">
-                        <div class="mb-3">
-                            <label for="editName" class="form-label">Name</label>
-                            <input type="text" class="form-control" id="editName">
-                        </div>
-                        <div class="mb-3">
-                            <label for="editEmail" class="form-label">Email</label>
-                            <input type="email" class="form-control" id="editEmail">
-                        </div>
-                        <div class="mb-3">
-                            <label for="editPhone" class="form-label">Phone</label>
-                            <input type="tel" class="form-control" id="editPhone">
-                        </div>
-                        <div class="mb-3">
-                            <label for="editOrganization" class="form-label">Organization</label>
-                            <input type="text" class="form-control" id="editOrganization">
-                        </div>
-                        <div class="mb-3">
-                            <label for="editDesignation" class="form-label">Designation</label>
-                            <input type="text" class="form-control" id="editDesignation">
-                        </div>
-                        <div class="mb-3">
-                            <label for="editEventDate" class="form-label">Event Date</label>
-                            <input type="date" class="form-control" id="editEventDate">
-                        </div>
-                        <div class="mb-3">
-                            <label for="editStatus" class="form-label">Status</label>
-                            <select class="form-control" id="editStatus">
-                                <option value="pending">Pending</option>
-                                <option value="confirmed">Confirmed</option>
-                                <option value="cancelled">Cancelled</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="editPaymentReference" class="form-label">Payment Reference</label>
-                            <input type="text" class="form-control" id="editPaymentReference">
-                        </div>
-                        <div class="mb-3">
-                            <label for="editNotes" class="form-label">Notes</label>
-                            <textarea class="form-control" id="editNotes" rows="3"></textarea>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" onclick="saveEdit()">Save changes</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
-    
     <script>
         $(document).ready(function() {
             $('#registrationsTable').DataTable({
-                order: [[0, 'desc']]
+                order: [[8, 'desc']], // Sort by registration date by default
+                pageLength: 25
             });
         });
 
-        let editModal;
-        document.addEventListener('DOMContentLoaded', function() {
-            editModal = new bootstrap.Modal(document.getElementById('editModal'));
-        });
-
-        function editRegistration(id) {
-            fetch(`/api/registrations/${id}`)
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('editId').value = data.id;
-                    document.getElementById('editName').value = data.name;
-                    document.getElementById('editEmail').value = data.email;
-                    document.getElementById('editPhone').value = data.phone;
-                    document.getElementById('editOrganization').value = data.organization;
-                    document.getElementById('editDesignation').value = data.designation;
-                    document.getElementById('editEventDate').value = data.event_date;
-                    document.getElementById('editStatus').value = data.status;
-                    document.getElementById('editPaymentReference').value = data.payment_reference;
-                    document.getElementById('editNotes').value = data.notes;
-                    editModal.show();
-                });
-        }
-
-        function saveEdit() {
-            const id = document.getElementById('editId').value;
-            const data = {
-                name: document.getElementById('editName').value,
-                email: document.getElementById('editEmail').value,
-                phone: document.getElementById('editPhone').value,
-                organization: document.getElementById('editOrganization').value,
-                designation: document.getElementById('editDesignation').value,
-                event_date: document.getElementById('editEventDate').value,
-                status: document.getElementById('editStatus').value,
-                payment_reference: document.getElementById('editPaymentReference').value,
-                notes: document.getElementById('editNotes').value
-            };
-
-            fetch(`/api/registrations/${id}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(data => {
-                editModal.hide();
-                location.reload();
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error updating registration');
-            });
+        function viewRegistration(id) {
+            // Implement view registration details
+            alert('View registration ' + id);
         }
 
         function deleteRegistration(id) {
             if (confirm('Are you sure you want to delete this registration?')) {
                 fetch(`/api/registrations/${id}`, {
-                    method: 'DELETE',
+                    method: 'DELETE'
                 })
-                .then(response => {
-                    if (response.ok) {
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
                         location.reload();
                     } else {
                         alert('Error deleting registration');
                     }
                 });
             }
-        }
-
-        function exportCSV() {
-            window.location.href = '/export';
         }
     </script>
 </body>

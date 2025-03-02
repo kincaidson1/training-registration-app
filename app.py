@@ -88,7 +88,7 @@ class Registration(db.Model):
 class Admin(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)  
+    password_hash = db.Column(db.String(255), nullable=False)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -100,11 +100,11 @@ def init_db():
     """Initialize the database and create default data."""
     try:
         with app.app_context():
-            # Drop and recreate all tables to apply the new column length
+            # Drop and recreate all tables to apply schema changes
             db.drop_all()
             db.create_all()
             
-            # Create default programs if they don't exist
+            # Create default programs
             programs = [
                 Program(
                     name='London Masterclass',
@@ -119,18 +119,24 @@ def init_db():
                     fee=1000.00
                 )
             ]
-            db.session.add_all(programs)
+            for program in programs:
+                try:
+                    db.session.add(program)
+                    db.session.commit()
+                    print(f"Added program: {program.name}")
+                except Exception as e:
+                    print(f"Error adding program {program.name}: {str(e)}")
+                    db.session.rollback()
             
             # Create default admin
-            admin = Admin(username='admin')
-            admin.set_password('admin123')
-            db.session.add(admin)
-            
             try:
+                admin = Admin(username='admin')
+                admin.set_password('admin123')
+                db.session.add(admin)
                 db.session.commit()
-                print("Database initialized successfully!")
+                print("Added admin user")
             except Exception as e:
-                print(f"Error during database commit: {str(e)}")
+                print(f"Error adding admin: {str(e)}")
                 db.session.rollback()
                 
     except Exception as e:
@@ -320,8 +326,30 @@ def admin_logout():
 @admin_required
 def admin():
     try:
-        registrations = Registration.query.order_by(Registration.created_at.desc()).all()
-        return render_template('admin.html', registrations=registrations)
+        # Join with Program to get program details
+        registrations = db.session.query(Registration, Program)\
+            .join(Program, Registration.program_id == Program.id)\
+            .order_by(Registration.created_at.desc())\
+            .all()
+        
+        # Format the data for the template
+        formatted_registrations = []
+        for reg, prog in registrations:
+            formatted_registrations.append({
+                'id': reg.id,
+                'program_name': prog.name,
+                'name': reg.name,
+                'email': reg.email,
+                'phone': reg.phone,
+                'organization': reg.organization,
+                'designation': reg.designation,
+                'status': reg.status,
+                'created_at': reg.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'payment_reference': reg.payment_reference,
+                'payment_receipt': reg.payment_receipt
+            })
+        
+        return render_template('admin.html', registrations=formatted_registrations)
     except Exception as e:
         print(f"Error in admin route: {str(e)}")
         flash('Error loading registrations. Please try again.', 'error')
