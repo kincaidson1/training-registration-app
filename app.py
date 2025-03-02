@@ -171,7 +171,11 @@ def send_ticket_email(registration):
         return False
 
 @app.route('/')
-def index():
+def welcome():
+    return render_template('welcome.html')
+
+@app.route('/register')
+def register_page():
     programs = Program.query.all()
     return render_template('index.html', programs=programs)
 
@@ -229,7 +233,7 @@ def register():
         flash('Registration failed. Please try again.', 'error')
         print(f"Error during registration: {str(e)}")
         
-    return redirect(url_for('index'))
+    return redirect(url_for('welcome'))
 
 @app.route('/admin')
 @admin_required
