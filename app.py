@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import os
@@ -49,6 +49,31 @@ def register():
         flash('Registration failed. Please try again.', 'error')
         
     return redirect(url_for('index'))
+
+# Admin routes
+@app.route('/admin')
+def admin():
+    registrations = Registration.query.order_by(Registration.created_at.desc()).all()
+    return render_template('admin.html', registrations=registrations)
+
+@app.route('/api/registrations')
+def get_registrations():
+    registrations = Registration.query.order_by(Registration.created_at.desc()).all()
+    return jsonify([{
+        'id': r.id,
+        'name': r.name,
+        'email': r.email,
+        'phone': r.phone,
+        'event_date': r.event_date.strftime('%Y-%m-%d'),
+        'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S')
+    } for r in registrations])
+
+@app.route('/api/registration/<int:id>', methods=['DELETE'])
+def delete_registration(id):
+    registration = Registration.query.get_or_404(id)
+    db.session.delete(registration)
+    db.session.commit()
+    return jsonify({'message': 'Registration deleted successfully'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
