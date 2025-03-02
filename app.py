@@ -1,9 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
+from flask_mail import Mail, Message
 from datetime import datetime
 import os
 import csv
-from io import StringIO
+import qrcode
+import base64
+from io import StringIO, BytesIO
 from functools import wraps
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -25,7 +28,16 @@ else:
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Configure Mail
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', '587'))
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER')
+
 db = SQLAlchemy(app)
+mail = Mail(app)
 
 # Hardcoded admin credentials for testing
 ADMIN_USERNAME = 'admin'
@@ -40,6 +52,7 @@ class Registration(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(20), default='pending')
     notes = db.Column(db.Text, nullable=True)
+    ticket_sent = db.Column(db.Boolean, default=False)
 
 def create_tables():
     with app.app_context():
@@ -70,6 +83,52 @@ def authenticate():
             'You have to login with proper credentials', 401,
             {'WWW-Authenticate': 'Basic realm="Login Required"'})
 
+def generate_qr_code(registration_id):
+    """Generate QR code for a registration."""
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(f"Registration ID: {registration_id}")
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode()
+
+def send_ticket_email(registration):
+    """Send ticket email to participant."""
+    try:
+        # Generate QR code
+        qr_code_data = generate_qr_code(registration.id)
+        
+        # Render email template
+        html = render_template('ticket_email.html',
+                             registration=registration,
+                             qr_code=f"data:image/png;base64,{qr_code_data}")
+        
+        # Create email message
+        msg = Message(
+            'Your Training Event Ticket',
+            recipients=[registration.email]
+        )
+        msg.html = html
+        
+        # Send email
+        mail.send(msg)
+        
+        # Update ticket sent status
+        registration.ticket_sent = True
+        db.session.commit()
+        
+        return True
+    except Exception as e:
+        print(f"Error sending ticket email: {str(e)}")
+        return False
+
 @app.route('/')
 def index():
     registrations = Registration.query.all()
@@ -92,10 +151,16 @@ def register():
         
         db.session.add(registration)
         db.session.commit()
-        flash('Registration successful!', 'success')
+        
+        # Send ticket email
+        if send_ticket_email(registration):
+            flash('Registration successful! Check your email for your ticket.', 'success')
+        else:
+            flash('Registration successful, but there was an error sending the ticket email. Please contact support.', 'warning')
+            
     except Exception as e:
         flash('Registration failed. Please try again.', 'error')
-        print(f"Error during registration: {str(e)}")  # Add logging
+        print(f"Error during registration: {str(e)}")
         
     return redirect(url_for('index'))
 

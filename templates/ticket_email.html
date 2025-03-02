@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .ticket {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+        }
+        .header {
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .qr-code {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .qr-code img {
+            max-width: 200px;
+        }
+        .details {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="ticket">
+        <div class="header">
+            <h1>Training Event Ticket</h1>
+            <p>Your registration has been confirmed!</p>
+        </div>
+        
+        <div class="details">
+            <h2>Registration Details</h2>
+            <p><strong>Name:</strong> {{ registration.name }}</p>
+            <p><strong>Email:</strong> {{ registration.email }}</p>
+            <p><strong>Event Date:</strong> {{ registration.event_date.strftime('%B %d, %Y') }}</p>
+            <p><strong>Registration ID:</strong> {{ registration.id }}</p>
+        </div>
+
+        <div class="qr-code">
+            <img src="{{ qr_code }}" alt="QR Code">
+            <p>Please present this QR code at the event entrance</p>
+        </div>
+
+        <div class="footer">
+            <p>This ticket is unique and tied to your registration.</p>
+            <p>For any questions, please contact the event organizers.</p>
+        </div>
+    </div>
+</body>
+</html>
