@@ -89,7 +89,7 @@ class Registration(db.Model):
 class Admin(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(120), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)  
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -101,36 +101,31 @@ def init_db():
     """Initialize the database and create default data."""
     try:
         with app.app_context():
-            # Create all tables
+            # Drop and recreate all tables to apply the new column length
+            db.drop_all()
             db.create_all()
             
             # Create default programs if they don't exist
-            if not Program.query.first():
-                programs = [
-                    Program(
-                        name='London Masterclass',
-                        description='Advanced training program in London',
-                        location='London',
-                        fee=1500.00
-                    ),
-                    Program(
-                        name='Lagos Masterclass',
-                        description='Advanced training program in Lagos',
-                        location='Lagos',
-                        fee=1000.00
-                    )
-                ]
-                db.session.add_all(programs)
+            programs = [
+                Program(
+                    name='London Masterclass',
+                    description='Advanced training program in London',
+                    location='London',
+                    fee=1500.00
+                ),
+                Program(
+                    name='Lagos Masterclass',
+                    description='Advanced training program in Lagos',
+                    location='Lagos',
+                    fee=1000.00
+                )
+            ]
+            db.session.add_all(programs)
             
-            # Create default admin if it doesn't exist
-            admin = Admin.query.filter_by(username='admin').first()
-            if not admin:
-                admin = Admin(username='admin')
-                admin.set_password('admin123')
-                db.session.add(admin)
-            else:
-                # Update existing admin password
-                admin.set_password('admin123')
+            # Create default admin
+            admin = Admin(username='admin')
+            admin.set_password('admin123')
+            db.session.add(admin)
             
             try:
                 db.session.commit()
