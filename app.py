@@ -8,14 +8,26 @@ from functools import wraps
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
+
+# Configure Flask app
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///events.db')
-if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
-    app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
+
+# Configure Database
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    # Handle Heroku/Render style database URLs
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    # Fallback to SQLite for local development
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///events.db'
+
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# Admin credentials (in production, use environment variables)
+# Admin credentials
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', generate_password_hash('admin123'))
 
@@ -26,11 +38,15 @@ class Registration(db.Model):
     phone = db.Column(db.String(20), nullable=False)
     event_date = db.Column(db.DateTime, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    status = db.Column(db.String(20), default='pending')  # pending, confirmed, cancelled
+    status = db.Column(db.String(20), default='pending')
     notes = db.Column(db.Text, nullable=True)
 
-with app.app_context():
-    db.create_all()
+def create_tables():
+    with app.app_context():
+        db.create_all()
+
+# Create tables
+create_tables()
 
 def admin_required(f):
     @wraps(f)
@@ -74,115 +90,140 @@ def register():
         flash('Registration successful!', 'success')
     except Exception as e:
         flash('Registration failed. Please try again.', 'error')
+        print(f"Error during registration: {str(e)}")  # Add logging
         
     return redirect(url_for('index'))
 
 @app.route('/admin')
 @admin_required
 def admin():
-    registrations = Registration.query.order_by(Registration.created_at.desc()).all()
-    return render_template('admin.html', registrations=registrations)
+    try:
+        registrations = Registration.query.order_by(Registration.created_at.desc()).all()
+        return render_template('admin.html', registrations=registrations)
+    except Exception as e:
+        print(f"Error in admin route: {str(e)}")  # Add logging
+        return "An error occurred", 500
 
 @app.route('/api/registrations')
 @admin_required
 def get_registrations():
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    status = request.args.get('status')
-    
-    query = Registration.query
-    
-    if start_date:
-        query = query.filter(Registration.event_date >= datetime.strptime(start_date, '%Y-%m-%d'))
-    if end_date:
-        query = query.filter(Registration.event_date <= datetime.strptime(end_date, '%Y-%m-%d'))
-    if status:
-        query = query.filter(Registration.status == status)
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        status = request.args.get('status')
         
-    registrations = query.order_by(Registration.created_at.desc()).all()
-    
-    return jsonify([{
-        'id': r.id,
-        'name': r.name,
-        'email': r.email,
-        'phone': r.phone,
-        'event_date': r.event_date.strftime('%Y-%m-%d'),
-        'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-        'status': r.status,
-        'notes': r.notes
-    } for r in registrations])
+        query = Registration.query
+        
+        if start_date:
+            query = query.filter(Registration.event_date >= datetime.strptime(start_date, '%Y-%m-%d'))
+        if end_date:
+            query = query.filter(Registration.event_date <= datetime.strptime(end_date, '%Y-%m-%d'))
+        if status:
+            query = query.filter(Registration.status == status)
+            
+        registrations = query.order_by(Registration.created_at.desc()).all()
+        
+        return jsonify([{
+            'id': r.id,
+            'name': r.name,
+            'email': r.email,
+            'phone': r.phone,
+            'event_date': r.event_date.strftime('%Y-%m-%d'),
+            'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'status': r.status,
+            'notes': r.notes
+        } for r in registrations])
+    except Exception as e:
+        print(f"Error in get_registrations: {str(e)}")  # Add logging
+        return jsonify({'error': 'An error occurred'}), 500
 
 @app.route('/api/registration/<int:id>', methods=['DELETE'])
 @admin_required
 def delete_registration(id):
-    registration = Registration.query.get_or_404(id)
-    db.session.delete(registration)
-    db.session.commit()
-    return jsonify({'message': 'Registration deleted successfully'})
+    try:
+        registration = Registration.query.get_or_404(id)
+        db.session.delete(registration)
+        db.session.commit()
+        return jsonify({'message': 'Registration deleted successfully'})
+    except Exception as e:
+        print(f"Error in delete_registration: {str(e)}")  # Add logging
+        return jsonify({'error': 'An error occurred'}), 500
 
 @app.route('/api/registration/<int:id>', methods=['PUT'])
 @admin_required
 def update_registration(id):
-    registration = Registration.query.get_or_404(id)
-    data = request.get_json()
-    
-    if 'name' in data:
-        registration.name = data['name']
-    if 'email' in data:
-        registration.email = data['email']
-    if 'phone' in data:
-        registration.phone = data['phone']
-    if 'event_date' in data:
-        registration.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d')
-    if 'status' in data:
-        registration.status = data['status']
-    if 'notes' in data:
-        registration.notes = data['notes']
-    
-    db.session.commit()
-    return jsonify({'message': 'Registration updated successfully'})
+    try:
+        registration = Registration.query.get_or_404(id)
+        data = request.get_json()
+        
+        if 'name' in data:
+            registration.name = data['name']
+        if 'email' in data:
+            registration.email = data['email']
+        if 'phone' in data:
+            registration.phone = data['phone']
+        if 'event_date' in data:
+            registration.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d')
+        if 'status' in data:
+            registration.status = data['status']
+        if 'notes' in data:
+            registration.notes = data['notes']
+        
+        db.session.commit()
+        return jsonify({'message': 'Registration updated successfully'})
+    except Exception as e:
+        print(f"Error in update_registration: {str(e)}")  # Add logging
+        return jsonify({'error': 'An error occurred'}), 500
 
 @app.route('/api/registrations/bulk-delete', methods=['POST'])
 @admin_required
 def bulk_delete():
-    ids = request.get_json().get('ids', [])
-    Registration.query.filter(Registration.id.in_(ids)).delete()
-    db.session.commit()
-    return jsonify({'message': f'{len(ids)} registrations deleted successfully'})
+    try:
+        ids = request.get_json().get('ids', [])
+        Registration.query.filter(Registration.id.in_(ids)).delete()
+        db.session.commit()
+        return jsonify({'message': f'{len(ids)} registrations deleted successfully'})
+    except Exception as e:
+        print(f"Error in bulk_delete: {str(e)}")  # Add logging
+        return jsonify({'error': 'An error occurred'}), 500
 
 @app.route('/api/export-csv')
 @admin_required
 def export_csv():
-    registrations = Registration.query.order_by(Registration.created_at.desc()).all()
-    
-    si = StringIO()
-    cw = csv.writer(si)
-    
-    # Write headers
-    cw.writerow(['ID', 'Name', 'Email', 'Phone', 'Event Date', 'Registration Date', 'Status', 'Notes'])
-    
-    # Write data
-    for r in registrations:
-        cw.writerow([
-            r.id,
-            r.name,
-            r.email,
-            r.phone,
-            r.event_date.strftime('%Y-%m-%d'),
-            r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-            r.status,
-            r.notes
-        ])
-    
-    output = si.getvalue()
-    si.close()
-    
-    return send_file(
-        StringIO(output),
-        mimetype='text/csv',
-        as_attachment=True,
-        download_name='registrations.csv'
-    )
+    try:
+        registrations = Registration.query.order_by(Registration.created_at.desc()).all()
+        
+        si = StringIO()
+        cw = csv.writer(si)
+        
+        # Write headers
+        cw.writerow(['ID', 'Name', 'Email', 'Phone', 'Event Date', 'Registration Date', 'Status', 'Notes'])
+        
+        # Write data
+        for r in registrations:
+            cw.writerow([
+                r.id,
+                r.name,
+                r.email,
+                r.phone,
+                r.event_date.strftime('%Y-%m-%d'),
+                r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                r.status,
+                r.notes
+            ])
+        
+        output = si.getvalue()
+        si.close()
+        
+        return send_file(
+            StringIO(output),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name='registrations.csv'
+        )
+    except Exception as e:
+        print(f"Error in export_csv: {str(e)}")  # Add logging
+        return "An error occurred while exporting data", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
