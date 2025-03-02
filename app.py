@@ -8,7 +8,8 @@ from flask import (
     jsonify, 
     send_file, 
     make_response, 
-    session
+    session,
+    Response
 )
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
@@ -458,6 +459,86 @@ def export_csv():
         return output
     except Exception as e:
         flash('Error exporting data', 'error')
+        return redirect(url_for('admin'))
+
+@app.route('/admin/export')
+@admin_required
+def export_registrations():
+    try:
+        # Query registrations with program information
+        registrations = db.session.query(Registration, Program)\
+            .join(Program, Registration.program_id == Program.id)\
+            .order_by(Registration.created_at.desc())\
+            .all()
+
+        # Create a string buffer for CSV data
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Write headers
+        headers = [
+            'ID', 'Program', 'Name', 'Email', 'Phone', 'Organization', 
+            'Designation', 'Expectations', 'Status', 'Registration Date',
+            'Payment Reference', 'Payment Receipt', 'Notes'
+        ]
+        writer.writerow(headers)
+
+        # Write registration data
+        for reg, prog in registrations:
+            row = [
+                reg.id,
+                prog.name,
+                reg.name,
+                reg.email,
+                reg.phone,
+                reg.organization,
+                reg.designation,
+                reg.expectations,
+                reg.status,
+                reg.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                reg.payment_reference,
+                reg.payment_receipt,
+                reg.notes
+            ]
+            writer.writerow(row)
+
+        # Create the response
+        output.seek(0)
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={
+                'Content-Disposition': 'attachment; filename=registrations.csv',
+                'Content-Type': 'text/csv'
+            }
+        )
+    except Exception as e:
+        print(f"Error exporting registrations: {str(e)}")
+        flash('Error exporting registrations', 'error')
+        return redirect(url_for('admin'))
+
+@app.route('/admin/receipt/<int:registration_id>')
+@admin_required
+def download_receipt(registration_id):
+    try:
+        registration = Registration.query.get_or_404(registration_id)
+        if not registration.payment_receipt:
+            flash('No receipt found for this registration', 'error')
+            return redirect(url_for('admin'))
+
+        receipt_path = os.path.join(app.config['UPLOAD_FOLDER'], registration.payment_receipt)
+        if not os.path.exists(receipt_path):
+            flash('Receipt file not found', 'error')
+            return redirect(url_for('admin'))
+
+        return send_file(
+            receipt_path,
+            as_attachment=True,
+            download_name=registration.payment_receipt
+        )
+    except Exception as e:
+        print(f"Error downloading receipt: {str(e)}")
+        flash('Error downloading receipt', 'error')
         return redirect(url_for('admin'))
 
 # Initialize the database when the app starts
