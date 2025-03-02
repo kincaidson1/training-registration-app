@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
 from datetime import datetime
@@ -234,12 +234,119 @@ def register():
 @app.route('/admin')
 @admin_required
 def admin():
+    registrations = Registration.query.order_by(Registration.created_at.desc()).all()
+    return render_template('admin.html', registrations=registrations)
+
+@app.route('/api/registrations/<int:id>', methods=['GET'])
+@admin_required
+def get_registration(id):
+    try:
+        registration = Registration.query.get_or_404(id)
+        return jsonify({
+            'id': registration.id,
+            'program': registration.program.name,
+            'name': registration.name,
+            'email': registration.email,
+            'phone': registration.phone,
+            'organization': registration.organization,
+            'designation': registration.designation,
+            'expectations': registration.expectations,
+            'event_date': registration.event_date.strftime('%Y-%m-%d'),
+            'created_at': registration.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'status': registration.status,
+            'payment_reference': registration.payment_reference,
+            'payment_receipt': registration.payment_receipt,
+            'notes': registration.notes
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/registrations/<int:id>', methods=['PUT'])
+@admin_required
+def update_registration(id):
+    try:
+        registration = Registration.query.get_or_404(id)
+        data = request.get_json()
+        
+        if 'name' in data:
+            registration.name = data['name']
+        if 'email' in data:
+            registration.email = data['email']
+        if 'phone' in data:
+            registration.phone = data['phone']
+        if 'organization' in data:
+            registration.organization = data['organization']
+        if 'designation' in data:
+            registration.designation = data['designation']
+        if 'expectations' in data:
+            registration.expectations = data['expectations']
+        if 'event_date' in data:
+            registration.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d')
+        if 'status' in data:
+            registration.status = data['status']
+        if 'payment_reference' in data:
+            registration.payment_reference = data['payment_reference']
+        if 'payment_receipt' in data:
+            registration.payment_receipt = data['payment_receipt']
+        if 'notes' in data:
+            registration.notes = data['notes']
+        
+        db.session.commit()
+        return jsonify({'message': 'Registration updated successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/registrations/<int:id>', methods=['DELETE'])
+@admin_required
+def delete_registration(id):
+    try:
+        registration = Registration.query.get_or_404(id)
+        db.session.delete(registration)
+        db.session.commit()
+        return '', 204
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/export')
+@admin_required
+def export_csv():
     try:
         registrations = Registration.query.order_by(Registration.created_at.desc()).all()
-        return render_template('admin.html', registrations=registrations)
+        
+        si = StringIO()
+        cw = csv.writer(si)
+        
+        # Write headers
+        cw.writerow(['ID', 'Program', 'Name', 'Email', 'Phone', 'Organization', 'Designation', 
+                    'Expectations', 'Event Date', 'Registration Date', 'Status', 
+                    'Payment Reference', 'Payment Receipt', 'Notes'])
+        
+        # Write data
+        for r in registrations:
+            cw.writerow([
+                r.id,
+                r.program.name,
+                r.name,
+                r.email,
+                r.phone,
+                r.organization,
+                r.designation,
+                r.expectations,
+                r.event_date.strftime('%Y-%m-%d'),
+                r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                r.status,
+                r.payment_reference,
+                r.payment_receipt,
+                r.notes
+            ])
+        
+        output = make_response(si.getvalue())
+        output.headers["Content-Disposition"] = "attachment; filename=registrations.csv"
+        output.headers["Content-type"] = "text/csv"
+        return output
     except Exception as e:
-        print(f"Error in admin route: {str(e)}")  # Add logging
-        return "An error occurred", 500
+        flash('Error exporting data', 'error')
+        return redirect(url_for('admin'))
 
 @app.route('/api/registrations')
 @admin_required
@@ -280,54 +387,6 @@ def get_registrations():
         print(f"Error in get_registrations: {str(e)}")  # Add logging
         return jsonify({'error': 'An error occurred'}), 500
 
-@app.route('/api/registration/<int:id>', methods=['DELETE'])
-@admin_required
-def delete_registration(id):
-    try:
-        registration = Registration.query.get_or_404(id)
-        db.session.delete(registration)
-        db.session.commit()
-        return jsonify({'message': 'Registration deleted successfully'})
-    except Exception as e:
-        print(f"Error in delete_registration: {str(e)}")  # Add logging
-        return jsonify({'error': 'An error occurred'}), 500
-
-@app.route('/api/registration/<int:id>', methods=['PUT'])
-@admin_required
-def update_registration(id):
-    try:
-        registration = Registration.query.get_or_404(id)
-        data = request.get_json()
-        
-        if 'name' in data:
-            registration.name = data['name']
-        if 'email' in data:
-            registration.email = data['email']
-        if 'phone' in data:
-            registration.phone = data['phone']
-        if 'organization' in data:
-            registration.organization = data['organization']
-        if 'designation' in data:
-            registration.designation = data['designation']
-        if 'expectations' in data:
-            registration.expectations = data['expectations']
-        if 'event_date' in data:
-            registration.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d')
-        if 'status' in data:
-            registration.status = data['status']
-        if 'payment_reference' in data:
-            registration.payment_reference = data['payment_reference']
-        if 'payment_receipt' in data:
-            registration.payment_receipt = data['payment_receipt']
-        if 'notes' in data:
-            registration.notes = data['notes']
-        
-        db.session.commit()
-        return jsonify({'message': 'Registration updated successfully'})
-    except Exception as e:
-        print(f"Error in update_registration: {str(e)}")  # Add logging
-        return jsonify({'error': 'An error occurred'}), 500
-
 @app.route('/api/registrations/bulk-delete', methods=['POST'])
 @admin_required
 def bulk_delete():
@@ -339,50 +398,6 @@ def bulk_delete():
     except Exception as e:
         print(f"Error in bulk_delete: {str(e)}")  # Add logging
         return jsonify({'error': 'An error occurred'}), 500
-
-@app.route('/api/export-csv')
-@admin_required
-def export_csv():
-    try:
-        registrations = Registration.query.order_by(Registration.created_at.desc()).all()
-        
-        si = StringIO()
-        cw = csv.writer(si)
-        
-        # Write headers
-        cw.writerow(['ID', 'Program', 'Name', 'Email', 'Phone', 'Organization', 'Designation', 'Expectations', 'Event Date', 'Registration Date', 'Status', 'Payment Reference', 'Payment Receipt', 'Notes'])
-        
-        # Write data
-        for r in registrations:
-            cw.writerow([
-                r.id,
-                r.program.name,
-                r.name,
-                r.email,
-                r.phone,
-                r.organization,
-                r.designation,
-                r.expectations,
-                r.event_date.strftime('%Y-%m-%d'),
-                r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-                r.status,
-                r.payment_reference,
-                r.payment_receipt,
-                r.notes
-            ])
-        
-        output = si.getvalue()
-        si.close()
-        
-        return send_file(
-            StringIO(output),
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name='registrations.csv'
-        )
-    except Exception as e:
-        print(f"Error in export_csv: {str(e)}")  # Add logging
-        return "An error occurred while exporting data", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

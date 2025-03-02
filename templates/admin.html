@@ -3,50 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard - Training Event Registration</title>
+    <title>Admin Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+    <link href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <style>
         body {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 2rem 0;
-            color: #333;
         }
         .container {
-            max-width: 1200px;
             background: rgba(255, 255, 255, 0.95);
             padding: 2rem;
             border-radius: 15px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
         }
-        .table {
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .table thead th {
-            background: #f8f9fa;
-            border-bottom: 2px solid #dee2e6;
-            color: #4a4a4a;
-        }
         .btn-action {
             padding: 0.25rem 0.5rem;
             font-size: 0.875rem;
-            margin: 0 0.25rem;
         }
-        .search-box {
-            max-width: 300px;
+        .modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
         }
-        .filters {
-            background: white;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
+        .btn-close {
+            filter: brightness(0) invert(1);
         }
-        .status-pending { color: #ffc107; }
-        .status-confirmed { color: #28a745; }
-        .status-cancelled { color: #dc3545; }
     </style>
 </head>
 <body>
@@ -54,85 +36,44 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1>Admin Dashboard</h1>
             <div>
-                <a href="/" class="btn btn-outline-primary me-2">Registration Form</a>
-                <button onclick="exportToCsv()" class="btn btn-success">Export CSV</button>
+                <button class="btn btn-success me-2" onclick="exportCSV()">Export CSV</button>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Home</a>
             </div>
         </div>
 
-        <div class="filters">
-            <div class="row g-3">
-                <div class="col-md-3">
-                    <input type="text" id="searchInput" class="form-control" placeholder="Search...">
-                </div>
-                <div class="col-md-3">
-                    <input type="date" id="startDate" class="form-control" placeholder="Start Date">
-                </div>
-                <div class="col-md-3">
-                    <input type="date" id="endDate" class="form-control" placeholder="End Date">
-                </div>
-                <div class="col-md-3">
-                    <select id="statusFilter" class="form-control">
-                        <option value="">All Statuses</option>
-                        <option value="pending">Pending</option>
-                        <option value="confirmed">Confirmed</option>
-                        <option value="cancelled">Cancelled</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <div class="mb-3">
-            <button onclick="bulkDelete()" class="btn btn-danger" id="bulkDeleteBtn" disabled>
-                Delete Selected (<span id="selectedCount">0</span>)
-            </button>
-        </div>
-        
         <div class="table-responsive">
-            <table class="table table-hover" id="registrationsTable">
+            <table id="registrationsTable" class="table table-striped">
                 <thead>
                     <tr>
-                        <th>
-                            <input type="checkbox" id="selectAll" onclick="toggleSelectAll()">
-                        </th>
                         <th>ID</th>
+                        <th>Program</th>
                         <th>Name</th>
                         <th>Email</th>
                         <th>Phone</th>
+                        <th>Organization</th>
                         <th>Event Date</th>
-                        <th>Registration Date</th>
                         <th>Status</th>
-                        <th>Notes</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for registration in registrations %}
-                    <tr data-id="{{ registration.id }}">
-                        <td>
-                            <input type="checkbox" class="registration-select" onchange="updateSelectedCount()">
-                        </td>
+                    <tr>
                         <td>{{ registration.id }}</td>
+                        <td>{{ registration.program.name }}</td>
                         <td>{{ registration.name }}</td>
                         <td>{{ registration.email }}</td>
                         <td>{{ registration.phone }}</td>
+                        <td>{{ registration.organization }}</td>
                         <td>{{ registration.event_date.strftime('%Y-%m-%d') }}</td>
-                        <td>{{ registration.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                         <td>
-                            <select class="form-select form-select-sm status-select" onchange="updateStatus({{ registration.id }}, this.value)">
-                                <option value="pending" {% if registration.status == 'pending' %}selected{% endif %}>Pending</option>
-                                <option value="confirmed" {% if registration.status == 'confirmed' %}selected{% endif %}>Confirmed</option>
-                                <option value="cancelled" {% if registration.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
-                            </select>
+                            <span class="badge {% if registration.status == 'confirmed' %}bg-success{% elif registration.status == 'pending' %}bg-warning{% else %}bg-danger{% endif %}">
+                                {{ registration.status }}
+                            </span>
                         </td>
                         <td>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="editNotes({{ registration.id }}, '{{ registration.notes|default('') }}')">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                        </td>
-                        <td>
-                            <button class="btn btn-danger btn-action" onclick="deleteRegistration({{ registration.id }})">
-                                <i class="bi bi-trash"></i>
-                            </button>
+                            <button class="btn btn-primary btn-action" onclick="editRegistration({{ registration.id }})">Edit</button>
+                            <button class="btn btn-danger btn-action" onclick="deleteRegistration({{ registration.id }})">Delete</button>
                         </td>
                     </tr>
                     {% endfor %}
@@ -141,180 +82,151 @@
         </div>
     </div>
 
-    <!-- Notes Modal -->
-    <div class="modal fade" id="notesModal" tabindex="-1">
-        <div class="modal-dialog">
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Edit Notes</h5>
+                    <h5 class="modal-title">Edit Registration</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <textarea id="notesText" class="form-control" rows="4"></textarea>
+                    <form id="editForm">
+                        <input type="hidden" id="editId">
+                        <div class="mb-3">
+                            <label for="editName" class="form-label">Name</label>
+                            <input type="text" class="form-control" id="editName">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editEmail" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="editEmail">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editPhone" class="form-label">Phone</label>
+                            <input type="tel" class="form-control" id="editPhone">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editOrganization" class="form-label">Organization</label>
+                            <input type="text" class="form-control" id="editOrganization">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editDesignation" class="form-label">Designation</label>
+                            <input type="text" class="form-control" id="editDesignation">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editEventDate" class="form-label">Event Date</label>
+                            <input type="date" class="form-control" id="editEventDate">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editStatus" class="form-label">Status</label>
+                            <select class="form-control" id="editStatus">
+                                <option value="pending">Pending</option>
+                                <option value="confirmed">Confirmed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editPaymentReference" class="form-label">Payment Reference</label>
+                            <input type="text" class="form-control" id="editPaymentReference">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editNotes" class="form-label">Notes</label>
+                            <textarea class="form-control" id="editNotes" rows="3"></textarea>
+                        </div>
+                    </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" onclick="saveNotes()">Save</button>
+                    <button type="button" class="btn btn-primary" onclick="saveEdit()">Save changes</button>
                 </div>
             </div>
         </div>
     </div>
 
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+    
     <script>
-        let currentNotesId = null;
-        const notesModal = new bootstrap.Modal(document.getElementById('notesModal'));
-
-        function updateSelectedCount() {
-            const count = document.querySelectorAll('.registration-select:checked').length;
-            document.getElementById('selectedCount').textContent = count;
-            document.getElementById('bulkDeleteBtn').disabled = count === 0;
-        }
-
-        function toggleSelectAll() {
-            const selectAll = document.getElementById('selectAll');
-            document.querySelectorAll('.registration-select').forEach(checkbox => {
-                checkbox.checked = selectAll.checked;
+        $(document).ready(function() {
+            $('#registrationsTable').DataTable({
+                order: [[0, 'desc']]
             });
-            updateSelectedCount();
-        }
+        });
 
-        function filterRegistrations() {
-            const searchText = document.getElementById('searchInput').value.toLowerCase();
-            const startDate = document.getElementById('startDate').value;
-            const endDate = document.getElementById('endDate').value;
-            const status = document.getElementById('statusFilter').value;
+        let editModal;
+        document.addEventListener('DOMContentLoaded', function() {
+            editModal = new bootstrap.Modal(document.getElementById('editModal'));
+        });
 
-            fetch(`/api/registrations?start_date=${startDate}&end_date=${endDate}&status=${status}`)
+        function editRegistration(id) {
+            fetch(`/api/registrations/${id}`)
                 .then(response => response.json())
                 .then(data => {
-                    // Update table with filtered data
-                    const tbody = document.querySelector('#registrationsTable tbody');
-                    tbody.innerHTML = data.map(r => `
-                        <tr data-id="${r.id}">
-                            <td><input type="checkbox" class="registration-select" onchange="updateSelectedCount()"></td>
-                            <td>${r.id}</td>
-                            <td>${r.name}</td>
-                            <td>${r.email}</td>
-                            <td>${r.phone}</td>
-                            <td>${r.event_date}</td>
-                            <td>${r.created_at}</td>
-                            <td>
-                                <select class="form-select form-select-sm status-select" onchange="updateStatus(${r.id}, this.value)">
-                                    <option value="pending" ${r.status === 'pending' ? 'selected' : ''}>Pending</option>
-                                    <option value="confirmed" ${r.status === 'confirmed' ? 'selected' : ''}>Confirmed</option>
-                                    <option value="cancelled" ${r.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
-                                </select>
-                            </td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="editNotes(${r.id}, '${r.notes || ''}')">
-                                    <i class="bi bi-pencil"></i>
-                                </button>
-                            </td>
-                            <td>
-                                <button class="btn btn-danger btn-action" onclick="deleteRegistration(${r.id})">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('');
+                    document.getElementById('editId').value = data.id;
+                    document.getElementById('editName').value = data.name;
+                    document.getElementById('editEmail').value = data.email;
+                    document.getElementById('editPhone').value = data.phone;
+                    document.getElementById('editOrganization').value = data.organization;
+                    document.getElementById('editDesignation').value = data.designation;
+                    document.getElementById('editEventDate').value = data.event_date;
+                    document.getElementById('editStatus').value = data.status;
+                    document.getElementById('editPaymentReference').value = data.payment_reference;
+                    document.getElementById('editNotes').value = data.notes;
+                    editModal.show();
                 });
         }
 
-        // Add event listeners for filters
-        document.getElementById('searchInput').addEventListener('input', filterRegistrations);
-        document.getElementById('startDate').addEventListener('change', filterRegistrations);
-        document.getElementById('endDate').addEventListener('change', filterRegistrations);
-        document.getElementById('statusFilter').addEventListener('change', filterRegistrations);
+        function saveEdit() {
+            const id = document.getElementById('editId').value;
+            const data = {
+                name: document.getElementById('editName').value,
+                email: document.getElementById('editEmail').value,
+                phone: document.getElementById('editPhone').value,
+                organization: document.getElementById('editOrganization').value,
+                designation: document.getElementById('editDesignation').value,
+                event_date: document.getElementById('editEventDate').value,
+                status: document.getElementById('editStatus').value,
+                payment_reference: document.getElementById('editPaymentReference').value,
+                notes: document.getElementById('editNotes').value
+            };
 
-        function updateStatus(id, status) {
-            fetch(`/api/registration/${id}`, {
+            fetch(`/api/registrations/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ status: status })
+                body: JSON.stringify(data)
             })
             .then(response => response.json())
             .then(data => {
-                // Show success message
-                alert('Status updated successfully');
+                editModal.hide();
+                location.reload();
             })
             .catch(error => {
-                alert('Error updating status');
                 console.error('Error:', error);
-            });
-        }
-
-        function editNotes(id, notes) {
-            currentNotesId = id;
-            document.getElementById('notesText').value = notes;
-            notesModal.show();
-        }
-
-        function saveNotes() {
-            const notes = document.getElementById('notesText').value;
-            fetch(`/api/registration/${currentNotesId}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ notes: notes })
-            })
-            .then(response => response.json())
-            .then(data => {
-                notesModal.hide();
-                alert('Notes updated successfully');
-            })
-            .catch(error => {
-                alert('Error updating notes');
-                console.error('Error:', error);
+                alert('Error updating registration');
             });
         }
 
         function deleteRegistration(id) {
             if (confirm('Are you sure you want to delete this registration?')) {
-                fetch(`/api/registration/${id}`, {
+                fetch(`/api/registrations/${id}`, {
                     method: 'DELETE',
                 })
-                .then(response => response.json())
-                .then(data => {
-                    alert('Registration deleted successfully');
-                    location.reload();
-                })
-                .catch(error => {
-                    alert('Error deleting registration');
-                    console.error('Error:', error);
+                .then(response => {
+                    if (response.ok) {
+                        location.reload();
+                    } else {
+                        alert('Error deleting registration');
+                    }
                 });
             }
         }
 
-        function bulkDelete() {
-            const selectedIds = Array.from(document.querySelectorAll('.registration-select:checked'))
-                .map(checkbox => checkbox.closest('tr').dataset.id);
-            
-            if (confirm(`Are you sure you want to delete ${selectedIds.length} registrations?`)) {
-                fetch('/api/registrations/bulk-delete', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ ids: selectedIds })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    alert(data.message);
-                    location.reload();
-                })
-                .catch(error => {
-                    alert('Error performing bulk delete');
-                    console.error('Error:', error);
-                });
-            }
-        }
-
-        function exportToCsv() {
-            window.location.href = '/api/export-csv';
+        function exportCSV() {
+            window.location.href = '/export';
         }
     </script>
 </body>
