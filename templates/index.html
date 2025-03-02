@@ -73,8 +73,15 @@
                     </div>
                     <div class="card-body">
                         <p class="card-text">{{ program.description }}</p>
-                        <div class="price mb-4">
-                            ₦{{ "{:,.2f}".format(program.fee) }}
+                        <div class="pricing">
+                            <h3 class="text-primary mb-3">Program Fee</h3>
+                            <h2 class="display-5 fw-bold">
+                                {% if program.location == 'London' %}
+                                ₦3,550,000
+                                {% else %}
+                                ₦1,250,000
+                                {% endif %}
+                            </h2>
                         </div>
                         <ul class="list-unstyled mb-4">
                             <li>✓ 3-day intensive program</li>

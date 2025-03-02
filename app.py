@@ -52,8 +52,8 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Email configuration
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
@@ -111,13 +111,13 @@ def init_db():
                     name='London Masterclass',
                     description='Advanced training program in London',
                     location='London',
-                    fee=1500.00
+                    fee=3550000.00  # ₦3,550,000
                 ),
                 Program(
                     name='Lagos Masterclass',
                     description='Advanced training program in Lagos',
                     location='Lagos',
-                    fee=1000.00
+                    fee=1250000.00  # ₦1,250,000
                 )
             ]
             for program in programs:
@@ -153,6 +153,50 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def send_confirmation_email(registration, program):
+    try:
+        # Generate QR code
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(f"Registration ID: {registration.id}\nName: {registration.name}\nProgram: {program.name}")
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+        
+        # Save QR code to bytes
+        img_bytes = BytesIO()
+        qr_img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        # Create email
+        msg = Message(
+            'Registration Confirmation',
+            recipients=[registration.email]
+        )
+        
+        # Render email template
+        msg.html = render_template(
+            'email/confirmation.html',
+            name=registration.name,
+            program_name=program.name,
+            registration_id=registration.id,
+            event_date=registration.created_at.strftime('%Y-%m-%d'),
+            payment_reference=registration.payment_reference
+        )
+        
+        # Attach QR code
+        msg.attach(
+            'registration_qr.png',
+            'image/png',
+            img_bytes.getvalue()
+        )
+        
+        # Send email
+        mail.send(msg)
+        print(f"Confirmation email sent to {registration.email}")
+        return True
+    except Exception as e:
+        print(f"Error sending confirmation email: {str(e)}")
+        return False
+
 @app.route('/')
 def welcome():
     try:
@@ -176,51 +220,55 @@ def program_registration(program_id):
     try:
         program = Program.query.get_or_404(program_id)
         if request.method == 'POST':
+            # Get form data
+            name = request.form.get('name')
+            email = request.form.get('email')
+            phone = request.form.get('phone')
+            organization = request.form.get('organization')
+            designation = request.form.get('designation')
+            expectations = request.form.get('expectations')
+            payment_reference = request.form.get('payment_reference')
+            
             # Handle file upload
-            payment_receipt = request.files['payment_receipt']
-            if payment_receipt:
-                filename = secure_filename(f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{payment_receipt.filename}")
-                payment_receipt.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            else:
-                filename = None
+            payment_receipt = None
+            if 'payment_receipt' in request.files:
+                file = request.files['payment_receipt']
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                    payment_receipt = filename
 
             # Create registration
             registration = Registration(
                 program_id=program_id,
-                name=request.form['name'],
-                email=request.form['email'],
-                phone=request.form['phone'],
-                organization=request.form['organization'],
-                designation=request.form['designation'],
-                expectations=request.form['expectations'],
-                payment_reference=request.form['payment_reference'],
-                payment_receipt=filename
+                name=name,
+                email=email,
+                phone=phone,
+                organization=organization,
+                designation=designation,
+                expectations=expectations,
+                payment_reference=payment_reference,
+                payment_receipt=payment_receipt
             )
+
+            # Save to database
             db.session.add(registration)
             db.session.commit()
 
             # Send confirmation email
-            try:
-                msg = Message(
-                    'Registration Confirmation',
-                    recipients=[registration.email]
-                )
-                msg.html = render_template(
-                    'email/confirmation.html',
-                    name=registration.name,
-                    program=program
-                )
-                mail.send(msg)
-            except Exception as e:
-                print(f"Error sending email: {str(e)}")
+            email_sent = send_confirmation_email(registration, program)
+            if not email_sent:
+                flash('Registration successful but there was an issue sending the confirmation email. Please contact support.', 'warning')
+            else:
+                flash('Registration successful! Please check your email for confirmation.', 'success')
 
-            flash('Registration successful! Check your email for confirmation.', 'success')
             return redirect(url_for('welcome'))
 
         return render_template('registration_form.html', program=program)
     except Exception as e:
-        print(f"Error in program_registration route: {str(e)}")
-        flash('An error occurred. Please try again.', 'error')
+        db.session.rollback()
+        print(f"Error in registration: {str(e)}")
+        flash('An error occurred during registration. Please try again.', 'error')
         return redirect(url_for('register'))
 
 @app.route('/submit_registration', methods=['POST'])
