@@ -170,7 +170,15 @@ def program_registration(program_id):
     try:
         program = Program.query.get_or_404(program_id)
         if request.method == 'POST':
-            # Handle form submission
+            # Handle file upload
+            payment_receipt = request.files['payment_receipt']
+            if payment_receipt:
+                filename = secure_filename(f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{payment_receipt.filename}")
+                payment_receipt.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            else:
+                filename = None
+
+            # Create registration
             registration = Registration(
                 program_id=program_id,
                 name=request.form['name'],
@@ -179,12 +187,31 @@ def program_registration(program_id):
                 organization=request.form['organization'],
                 designation=request.form['designation'],
                 expectations=request.form['expectations'],
-                event_date=datetime.strptime(request.form['event_date'], '%Y-%m-%d')
+                event_date=datetime.strptime(request.form['event_date'], '%Y-%m-%d'),
+                payment_reference=request.form['payment_reference'],
+                payment_receipt=filename
             )
             db.session.add(registration)
             db.session.commit()
-            flash('Registration successful!', 'success')
+
+            # Send confirmation email
+            try:
+                msg = Message(
+                    'Registration Confirmation',
+                    recipients=[registration.email]
+                )
+                msg.html = render_template(
+                    'email/confirmation.html',
+                    name=registration.name,
+                    program=program
+                )
+                mail.send(msg)
+            except Exception as e:
+                print(f"Error sending email: {str(e)}")
+
+            flash('Registration successful! Check your email for confirmation.', 'success')
             return redirect(url_for('welcome'))
+
         return render_template('registration_form.html', program=program)
     except Exception as e:
         print(f"Error in program_registration route: {str(e)}")

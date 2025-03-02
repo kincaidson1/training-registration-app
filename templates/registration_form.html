@@ -53,6 +53,25 @@
             font-weight: bold;
             color: #764ba2;
         }
+        .payment-info {
+            background: #fff3cd;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 2rem 0;
+            border: 1px solid #ffeeba;
+        }
+        .payment-info h3 {
+            color: #856404;
+            margin-bottom: 1rem;
+        }
+        .payment-info ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        .payment-info li {
+            margin-bottom: 0.5rem;
+            color: #533f03;
+        }
     </style>
 </head>
 <body>
@@ -109,6 +128,28 @@
             <div class="mb-3">
                 <label for="expectations" class="form-label">What do you hope to learn? *</label>
                 <textarea class="form-control" id="expectations" name="expectations" rows="4" required></textarea>
+            </div>
+
+            <div class="payment-info">
+                <h3>Payment Information</h3>
+                <p>Please make payment to:</p>
+                <ul>
+                    <li><strong>Account Name:</strong> Brainbox Labs & Consult Ltd</li>
+                    <li><strong>Bank Name:</strong> Unity Bank Plc</li>
+                    <li><strong>Account Number:</strong> 0060696959</li>
+                </ul>
+            </div>
+
+            <div class="mb-3">
+                <label for="payment_reference" class="form-label">Transaction Reference Number *</label>
+                <input type="text" class="form-control" id="payment_reference" name="payment_reference" required>
+                <div class="form-text">Enter the reference number from your bank transaction</div>
+            </div>
+
+            <div class="mb-3">
+                <label for="payment_receipt" class="form-label">Upload Payment Receipt *</label>
+                <input type="file" class="form-control" id="payment_receipt" name="payment_receipt" accept=".pdf,.png,.jpg,.jpeg" required>
+                <div class="form-text">Accepted formats: PDF, PNG, JPG, JPEG (Max size: 5MB)</div>
             </div>
             
             <button type="submit" class="btn btn-primary btn-submit">Submit Registration</button>

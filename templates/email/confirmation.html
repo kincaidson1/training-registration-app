@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background-color: #667eea;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 5px 5px 0 0;
+        }
+        .content {
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 0 0 5px 5px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Registration Confirmation</h1>
+        </div>
+        <div class="content">
+            <p>Dear {{ name }},</p>
+            
+            <p>Thank you for registering for the {{ program.name }}. We have received your registration and payment details.</p>
+            
+            <h3>Program Details:</h3>
+            <ul>
+                <li><strong>Program:</strong> {{ program.name }}</li>
+                <li><strong>Location:</strong> {{ program.location }}</li>
+                <li><strong>Fee:</strong> ₦{{ "{:,.2f}".format(program.fee) }}</li>
+            </ul>
+            
+            <p>We will review your registration and payment information. Once confirmed, we will send you additional details about the program schedule and materials.</p>
+            
+            <p>If you have any questions, please don't hesitate to contact us.</p>
+            
+            <p>Best regards,<br>Training Team</p>
+        </div>
+        <div class="footer">
+            <p>This is an automated message, please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>
